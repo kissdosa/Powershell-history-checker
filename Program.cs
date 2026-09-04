@@ -179,6 +179,63 @@ namespace PSHistoryChecker
         }
     }
 
+    // 날짜 변경 진행 알림 팝업
+    public class DateLoadingForm : Form
+    {
+        public DateLoadingForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.ShowInTaskbar = false;
+            this.Size = new Size(360, 110);
+            this.BackColor = Color.White;
+            this.Padding = new Padding(20);
+            this.TopMost = true;
+
+            var lblTitle = new Label
+            {
+                Text = "날짜 변경 중",
+                Font = new Font("맑은 고딕", 11.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(25, 31, 40),
+                Dock = DockStyle.Top,
+                Height = 30,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            var lblMsg = new Label
+            {
+                Text = "날짜를 변경 중입니다. 잠시만 기다려 주세요.",
+                Font = new Font("맑은 고딕", 9.5F),
+                ForeColor = Color.FromArgb(78, 89, 104),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            this.Controls.Add(lblMsg);
+            this.Controls.Add(lblTitle);
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            WinApiHelper.ApplyRoundRegion(this, 20);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            using (var path = WinApiHelper.GetRoundPath(new Rectangle(0, 0, this.Width - 1, this.Height - 1), 20))
+            {
+                using (var pen = new Pen(Color.FromArgb(215, 221, 230), 1.5f))
+                {
+                    e.Graphics.DrawPath(pen, path);
+                }
+            }
+        }
+    }
+
     public class TossModalDialog : Form
     {
         public TossModalDialog(string title, string message)
@@ -432,7 +489,6 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
-            // 딜레이 없는 즉시 반응형 팝업 달력 (ToolStripDropDown + MonthCalendar)
             calPicker = new MonthCalendar
             {
                 MaxSelectionCount = 1,
@@ -453,14 +509,27 @@ namespace PSHistoryChecker
             };
             calDropDown.Items.Add(calHost);
 
-            // 날짜를 클릭하는 순간 0ms 즉시 반영 및 팝업 닫힘
+            // 날짜 선택 시 로딩 팝업 표시
             calPicker.DateSelected += (s, e) =>
             {
-                selectedDate = e.Start.Date;
-                btnDateFilter.Text = selectedDate.ToString("yyyy년 MM월 dd일");
-                btnDateFilter.AdjustFlexibleWidth();
-                RearrangeControls();
+                DateTime newDate = e.Start.Date;
                 calDropDown.Close();
+
+                using (var loading = new DateLoadingForm())
+                {
+                    loading.Location = new Point(this.Left + (this.Width - loading.Width) / 2, this.Top + (this.Height - loading.Height) / 2);
+                    loading.Show(this);
+                    loading.Update();
+                    Application.DoEvents();
+
+                    selectedDate = newDate;
+                    btnDateFilter.Text = selectedDate.ToString("yyyy년 MM월 dd일");
+                    btnDateFilter.AdjustFlexibleWidth();
+                    RearrangeControls();
+
+                    System.Threading.Thread.Sleep(300);
+                    loading.Close();
+                }
             };
 
             btnDateFilter = new TossChipButton
