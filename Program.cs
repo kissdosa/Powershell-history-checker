@@ -183,8 +183,8 @@ namespace PSHistoryChecker
         public MainForm()
         {
             this.Text = "Powershell 입력 명령어 체크리스트";
-            this.Size = new Size(880, 620);
-            this.MinimumSize = new Size(820, 540);
+            this.Size = new Size(920, 680);
+            this.MinimumSize = new Size(880, 620);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(242, 244, 246);
             this.Font = new Font("맑은 고딕", 9.5F);
@@ -210,12 +210,12 @@ namespace PSHistoryChecker
                 Padding = new Padding(24)
             };
 
-            // 상단 영역 (타이틀 + 설명 + 컨트롤)
+            // 상단 영역
             var topArea = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 135,
-                Padding = new Padding(0, 0, 0, 10)
+                Height = 150,
+                Padding = new Padding(0, 0, 0, 8)
             };
 
             var lblTitle = new Label
@@ -224,17 +224,17 @@ namespace PSHistoryChecker
                 Font = new Font("맑은 고딕", 14F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(25, 31, 40),
                 Dock = DockStyle.Top,
-                Height = 32
+                Height = 34
             };
 
             var lblDesc = new Label
             {
                 Text = "- 본 프로그램은 입력하신 MDP 진단 관련하여 Powershell 명령어 취합 하는 프로그램입니다. 날짜를 선택후 확인 버튼을 눌러주세요.\r\n" +
                        "- 명령어 입력후 나오는 결과값은 수집되지 않고 단순 명령어만 수집하니 참고 부탁드립니다.",
-                Font = new Font("맑은 고딕", 9F),
+                Font = new Font("맑은 고딕", 9.5F),
                 ForeColor = Color.FromArgb(107, 118, 132),
                 Dock = DockStyle.Top,
-                Height = 44
+                Height = 52
             };
 
             var controlRow = new Panel
@@ -292,11 +292,11 @@ namespace PSHistoryChecker
             topArea.Controls.Add(lblDesc);
             topArea.Controls.Add(lblTitle);
 
-            // 하단 영역 (복사/저장 버튼 + 법적 문구)
+            // 하단 영역
             var bottomArea = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 84,
+                Height = 100,
                 Padding = new Padding(0, 8, 0, 0)
             };
 
@@ -308,13 +308,13 @@ namespace PSHistoryChecker
 
             btnSaveAll = new RoundedButton
             {
-                Text = "전체 TXT 저장",
+                Text = "전체 명령어 저장",
                 BorderRadius = 8,
                 Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(49, 130, 246),
                 Dock = DockStyle.Right,
-                Width = 114
+                Width = 135
             };
             btnSaveAll.Click += (s, e) => SaveAllToFile();
 
@@ -342,18 +342,18 @@ namespace PSHistoryChecker
                 Font = new Font("맑은 고딕", 8F),
                 ForeColor = Color.FromArgb(142, 151, 163),
                 Dock = DockStyle.Bottom,
-                Height = 34,
+                Height = 38,
                 TextAlign = ContentAlignment.MiddleCenter
             };
 
             bottomArea.Controls.Add(actionRow);
             bottomArea.Controls.Add(lblFooter);
 
-            // 중앙 테이블 (Dock = Fill)
+            // 중앙 테이블
             var gridContainer = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(0, 10, 0, 10)
+                Padding = new Padding(0, 8, 0, 8)
             };
 
             gridCommands = new DataGridView
@@ -368,21 +368,21 @@ namespace PSHistoryChecker
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
-                RowTemplate = { Height = 36 },
+                RowTemplate = { Height = 40 },
                 EnableHeadersVisualStyles = false
             };
 
             gridCommands.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251);
             gridCommands.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(78, 89, 104);
             gridCommands.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
-            gridCommands.ColumnHeadersHeight = 36;
+            gridCommands.ColumnHeadersHeight = 38;
             gridCommands.DefaultCellStyle.SelectionBackColor = Color.FromArgb(235, 243, 254);
             gridCommands.DefaultCellStyle.SelectionForeColor = Color.FromArgb(25, 31, 40);
 
             var colTime = new DataGridViewTextBoxColumn
             {
                 HeaderText = "날짜 시간",
-                Width = 160,
+                Width = 165,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
 
@@ -398,11 +398,41 @@ namespace PSHistoryChecker
                 HeaderText = "명령어 보기",
                 Text = "명령어 보기",
                 UseColumnTextForButtonValue = true,
-                Width = 110,
+                Width = 120,
                 FlatStyle = FlatStyle.Flat
             };
 
             gridCommands.Columns.AddRange(colTime, colPreview, colAction);
+
+            // 토스 블루 둥근 버튼 커스텀 페인팅
+            gridCommands.CellPainting += (s, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex == 2)
+                {
+                    e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+
+                    var btnRect = new Rectangle(e.CellBounds.X + 8, e.CellBounds.Y + 4, e.CellBounds.Width - 16, e.CellBounds.Height - 8);
+                    using (var path = RoundedButton.GetRoundPath(btnRect, 6))
+                    {
+                        using (var brush = new SolidBrush(Color.FromArgb(49, 130, 246)))
+                        {
+                            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                            e.Graphics.FillPath(brush, path);
+                        }
+
+                        TextRenderer.DrawText(
+                            e.Graphics,
+                            "명령어 보기",
+                            new Font("맑은 고딕", 9F, FontStyle.Bold),
+                            btnRect,
+                            Color.White,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+                        );
+                    }
+                    e.Handled = true;
+                }
+            };
+
             gridCommands.CellContentClick += (s, e) =>
             {
                 if (e.RowIndex >= 0 && e.ColumnIndex == 2) OpenDetail(e.RowIndex);
@@ -428,7 +458,6 @@ namespace PSHistoryChecker
             string s = cmd.Trim();
 
             if (s.StartsWith("<#") || s.StartsWith("#requires")) return true;
-            if (s.StartsWith("#") && !s.StartsWith("# ")) return true;
             if (s.Contains("$__cmdletization", StringComparison.OrdinalIgnoreCase)) return true;
             if (s.Contains("TabExpansion2", StringComparison.OrdinalIgnoreCase)) return true;
             if (s.Contains("PSReadLine", StringComparison.OrdinalIgnoreCase)) return true;
@@ -448,7 +477,7 @@ namespace PSHistoryChecker
         {
             allEvents.Clear();
 
-            // 1. Operational Event Log (4104)
+            // 1. 이벤트 로그(4104) 수집
             try
             {
                 string query = "*[System[(EventID=4104)]]";
@@ -479,50 +508,63 @@ namespace PSHistoryChecker
             }
             catch { }
 
-            // 2. Windows PowerShell Classic Event Log (Event 800)
-            try
-            {
-                string classicQuery = "*[System[(EventID=800)]]";
-                var classicLogQuery = new EventLogQuery("Windows PowerShell", PathType.LogName, classicQuery) { ReverseDirection = true };
-                using var reader = new EventLogReader(classicLogQuery);
-                EventRecord record;
-                while ((record = reader.ReadEvent()) != null)
-                {
-                    using (record)
-                    {
-                        var time = record.TimeCreated ?? DateTime.Now;
-                        string desc = record.FormatDescription() ?? "";
-                        string cmd = ExtractCommandLineFromClassicEvent(desc);
-                        if (!string.IsNullOrWhiteSpace(cmd) && !IsSystemInternalNoise(cmd))
-                        {
-                            allEvents.Add(new HistoryEntry { Time = time, FullCommand = cmd });
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // 3. PSReadLine 히스토리 파일 직접 수집 (누락 방지)
+            // 2. 콘솔 히스토리 수집 (여러 줄 묶음 파싱 및 최신순 역순 배치)
             LoadConsoleHistoryFile();
 
             // 중복 제거 및 시간 정렬
             DeduplicateAndSortEvents();
         }
 
-        private string ExtractCommandLineFromClassicEvent(string desc)
+        // 여러 줄로 이루어진 스크립트/명령어를 하나로 병합하는 파서
+        private List<string> ParseCommandsFromLines(IEnumerable<string> rawLines)
         {
-            if (string.IsNullOrWhiteSpace(desc)) return "";
-            using var sr = new StringReader(desc);
-            string? line;
-            while ((line = sr.ReadLine()) != null)
+            var commands = new List<string>();
+            var currentCmd = new StringBuilder();
+            int braceDepth = 0;
+            int parenDepth = 0;
+
+            foreach (var rawLine in rawLines)
             {
+                string line = rawLine;
                 string trimmed = line.Trim();
-                if (trimmed.StartsWith("CommandLine=", StringComparison.OrdinalIgnoreCase))
+
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
+                if (currentCmd.Length > 0)
                 {
-                    return trimmed.Substring("CommandLine=".Length).Trim();
+                    currentCmd.AppendLine(line);
+                }
+                else
+                {
+                    currentCmd.Append(line);
+                }
+
+                foreach (char c in trimmed)
+                {
+                    if (c == '{') braceDepth++;
+                    else if (c == '}') braceDepth = Math.Max(0, braceDepth - 1);
+                    else if (c == '(') parenDepth++;
+                    else if (c == ')') parenDepth = Math.Max(0, parenDepth - 1);
+                }
+
+                // 백틱, 파이프, 미완성 괄호인 경우 다음 줄과 연결
+                bool continues = trimmed.EndsWith("`") || trimmed.EndsWith("|") || braceDepth > 0 || parenDepth > 0;
+
+                if (!continues)
+                {
+                    commands.Add(currentCmd.ToString().Trim());
+                    currentCmd.Clear();
+                    braceDepth = 0;
+                    parenDepth = 0;
                 }
             }
-            return "";
+
+            if (currentCmd.Length > 0)
+            {
+                commands.Add(currentCmd.ToString().Trim());
+            }
+
+            return commands;
         }
 
         private void LoadConsoleHistoryFile()
@@ -537,15 +579,34 @@ namespace PSHistoryChecker
                     var fileInfo = new FileInfo(historyPath);
                     DateTime modTime = fileInfo.LastWriteTime;
 
-                    using var fs = new FileStream(historyPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    using var sr = new StreamReader(fs, Encoding.UTF8);
-                    string? line;
-                    while ((line = sr.ReadLine()) != null)
+                    var rawLines = new List<string>();
+                    using (var fs = new FileStream(historyPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var sr = new StreamReader(fs, Encoding.UTF8))
                     {
-                        string clean = line.Trim();
-                        if (!string.IsNullOrWhiteSpace(clean) && !IsSystemInternalNoise(clean))
+                        string? line;
+                        while ((line = sr.ReadLine()) != null)
                         {
-                            allEvents.Add(new HistoryEntry { Time = modTime, FullCommand = clean });
+                            rawLines.Add(line);
+                        }
+                    }
+
+                    // 여러 줄 명령어 병합 파싱
+                    var parsedCommands = ParseCommandsFromLines(rawLines);
+
+                    // 파일의 맨 끝(가장 최근 입력한 명령어)부터 최신순으로 시간 배정
+                    parsedCommands.Reverse();
+                    int offsetSeconds = 0;
+
+                    foreach (var cmd in parsedCommands)
+                    {
+                        if (!string.IsNullOrWhiteSpace(cmd) && !IsSystemInternalNoise(cmd))
+                        {
+                            allEvents.Add(new HistoryEntry
+                            {
+                                Time = modTime.AddSeconds(-offsetSeconds),
+                                FullCommand = cmd
+                            });
+                            offsetSeconds++;
                         }
                     }
                 }
@@ -560,7 +621,8 @@ namespace PSHistoryChecker
 
             foreach (var item in allEvents)
             {
-                string key = $"{item.Time:yyyy-MM-dd}|{item.FullCommand}";
+                // 앞뒤 공백 및 줄바꿈 정리 기준 중복 체크
+                string key = $"{item.Time:yyyy-MM-dd}|{item.FullCommand.Trim()}";
                 if (seen.Add(key))
                 {
                     unique.Add(item);
@@ -579,8 +641,11 @@ namespace PSHistoryChecker
             gridCommands.Rows.Clear();
             foreach (var item in filteredEvents)
             {
-                string firstLine = item.FullCommand.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0];
-                string preview = firstLine.Length > 50 ? firstLine.Substring(0, 50) + "..." : firstLine;
+                // 명령어의 첫 번째 줄만 추출
+                string firstLine = item.FullCommand.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                if (firstLine.EndsWith("`")) firstLine = firstLine.TrimEnd('`').Trim();
+
+                string preview = firstLine.Length > 55 ? firstLine.Substring(0, 55) + "..." : firstLine;
                 gridCommands.Rows.Add(item.Time.ToString("yyyy-MM-dd HH:mm:ss"), preview, "명령어 보기");
             }
 
@@ -651,7 +716,7 @@ namespace PSHistoryChecker
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterParent;
             this.ShowInTaskbar = false;
-            this.Size = new Size(680, 460);
+            this.Size = new Size(700, 480);
             this.BackColor = Color.FromArgb(230, 233, 237);
             this.Padding = new Padding(1);
 
@@ -685,7 +750,7 @@ namespace PSHistoryChecker
                 ForeColor = Color.FromArgb(78, 89, 104),
                 BackColor = Color.FromArgb(242, 244, 246),
                 Size = new Size(82, 32),
-                Location = new Point(470, 4)
+                Location = new Point(490, 4)
             };
             btnCopy.Click += (s, e) =>
             {
@@ -701,7 +766,7 @@ namespace PSHistoryChecker
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(49, 130, 246),
                 Size = new Size(82, 32),
-                Location = new Point(558, 4)
+                Location = new Point(578, 4)
             };
             btnSave.Click += (s, e) =>
             {
