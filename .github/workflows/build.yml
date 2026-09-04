@@ -1,0 +1,29 @@
+name: Build Single EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: 체크아웃
+      uses: actions/checkout@v4
+
+    - name: .NET 환경 설정
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: 단일 EXE 파일 빌드
+      run: |
+        dotnet publish PSHistoryChecker.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+
+    - name: 빌드 결과물(EXE) 업로드
+      uses: actions/upload-artifact@v4
+      with:
+        name: PSHistoryChecker
+        path: ./publish/PSHistoryChecker.exe
