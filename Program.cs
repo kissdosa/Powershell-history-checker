@@ -17,16 +17,13 @@ namespace PSHistoryChecker
         {
             ApplicationConfiguration.Initialize();
 
-            // 1. 실행과 동시에 대기 팝업을 즉각 띄움
             var splash = new SplashForm();
             splash.Show();
             splash.Update();
             Application.DoEvents();
 
-            // 2. 스플래시가 떠 있는 동안 메인 폼 및 데이터 초기화
             var mainForm = new MainForm();
 
-            // 3. 준비 완료 즉시 스플래시를 닫고 메인 창 실행
             splash.Close();
             splash.Dispose();
 
@@ -34,7 +31,6 @@ namespace PSHistoryChecker
         }
     }
 
-    // Windows 프로세스 토큰 권한 검사 및 윈도우 스타일 헬퍼
     internal static class WinApiHelper
     {
         [DllImport("advapi32.dll", SetLastError = true)]
@@ -66,42 +62,35 @@ namespace PSHistoryChecker
             return path;
         }
 
-        // 프로세스 ID를 통해 해당 프로세스가 관리자 권한(Elevated)인지 확인
-        public static bool CheckIsProcessElevated(int pid)
+        public static bool CheckIsProcessElevated(IntPtr handle)
         {
-            try
+            if (OpenProcessToken(handle, 0x0008, out IntPtr tokenHandle))
             {
-                using var proc = System.Diagnostics.Process.GetProcessById(pid);
-                if (OpenProcessToken(proc.Handle, 0x0008, out IntPtr tokenHandle))
+                try
                 {
+                    int elevationSize = Marshal.SizeOf<int>();
+                    IntPtr elevationPtr = Marshal.AllocHGlobal(elevationSize);
                     try
                     {
-                        int elevationSize = Marshal.SizeOf<int>();
-                        IntPtr elevationPtr = Marshal.AllocHGlobal(elevationSize);
-                        try
+                        if (GetTokenInformation(tokenHandle, 20, elevationPtr, (uint)elevationSize, out _))
                         {
-                            if (GetTokenInformation(tokenHandle, 20, elevationPtr, (uint)elevationSize, out _))
-                            {
-                                return Marshal.ReadInt32(elevationPtr) != 0;
-                            }
-                        }
-                        finally
-                        {
-                            Marshal.FreeHGlobal(elevationPtr);
+                            return Marshal.ReadInt32(elevationPtr) != 0;
                         }
                     }
                     finally
                     {
-                        CloseHandle(tokenHandle);
+                        Marshal.FreeHGlobal(elevationPtr);
                     }
                 }
+                finally
+                {
+                    CloseHandle(tokenHandle);
+                }
             }
-            catch { }
             return false;
         }
     }
 
-    // 안티에일리어싱 칩 버튼 컴포넌트
     public class TossChipButton : Control
     {
         public bool HasChevron { get; set; } = false;
@@ -212,7 +201,6 @@ namespace PSHistoryChecker
         }
     }
 
-    // 딤 오버레이
     public class DimOverlayForm : Form
     {
         public DimOverlayForm(Form parent)
@@ -228,7 +216,6 @@ namespace PSHistoryChecker
         }
     }
 
-    // 모달 알림창
     public class TossModalDialog : Form
     {
         public TossModalDialog(string title, string message)
@@ -236,7 +223,7 @@ namespace PSHistoryChecker
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterParent;
             this.ShowInTaskbar = false;
-            this.Size = new Size(380, 185);
+            this.Size = new Size(380, 195);
             this.BackColor = Color.White;
             this.Padding = new Padding(24);
 
@@ -308,7 +295,6 @@ namespace PSHistoryChecker
         }
     }
 
-    // 시작 대기 팝업
     public class SplashForm : Form
     {
         public SplashForm()
@@ -376,34 +362,39 @@ namespace PSHistoryChecker
         }
     }
 
-    // 메인 창
     public class MainForm : Form
     {
         private TossChipButton btnDateFilter = null!;
         private DateTimePicker dtPicker = null!;
         private TossChipButton btnConfirm = null!;
         private TossChipButton btnRefresh = null!;
+        private TextBox txtSearch = null!;
+        private Label lblItemCount = null!;
+        private TossChipButton btnAbout = null!;
         private TossChipButton btnCopyAll = null!;
         private TossChipButton btnSaveAll = null!;
         private DataGridView gridCommands = null!;
+
         private List<HistoryEntry> allEvents = new();
         private List<HistoryEntry> filteredEvents = new();
         private DateTime selectedDate = DateTime.Today;
-        private Dictionary<int, bool> elevationCache = new();
+
+        private bool sortTimeDesc = true;
+        private bool sortCmdDesc = false;
+        private int lastSortColumn = 0; // 0: 시간, 2: 명령어
 
         public MainForm()
         {
             this.Text = "Powershell 입력 명령어 체크리스트";
-            this.Size = new Size(960, 680);
-            this.MinimumSize = new Size(900, 620);
+            this.Size = new Size(1000, 700);
+            this.MinimumSize = new Size(940, 620);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(242, 244, 246);
             this.Font = new Font("맑은 고딕", 9.5F);
 
             InitializeLayout();
-            ScanRunningPowerShells();
             LoadHistoryData();
-            FilterBySelectedDate(isInitialLoad: true);
+            FilterAndDisplay(isInitialLoad: true);
         }
 
         private void InitializeLayout()
@@ -422,11 +413,19 @@ namespace PSHistoryChecker
                 Padding = new Padding(28)
             };
 
+            // 상단 타이틀 영역 (타이틀 + 우측 제품 정보 버튼)
             var topArea = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 150,
+                Height = 155,
                 Padding = new Padding(0, 0, 0, 8),
+                BackColor = Color.White
+            };
+
+            var titleRow = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
                 BackColor = Color.White
             };
 
@@ -435,9 +434,23 @@ namespace PSHistoryChecker
                 Text = "Powershell 입력 명령어 체크리스트",
                 Font = new Font("맑은 고딕", 15F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(25, 31, 40),
-                Dock = DockStyle.Top,
-                Height = 36
+                Dock = DockStyle.Left,
+                AutoSize = true
             };
+
+            btnAbout = new TossChipButton
+            {
+                Text = "제품 정보",
+                ChipColor = Color.FromArgb(242, 244, 246),
+                ForeColor = Color.FromArgb(78, 89, 104),
+                Dock = DockStyle.Right,
+                Height = 32
+            };
+            btnAbout.AdjustFlexibleWidth();
+            btnAbout.Click += (s, e) => ShowAboutDialog();
+
+            titleRow.Controls.Add(lblTitle);
+            titleRow.Controls.Add(btnAbout);
 
             var lblDesc = new Label
             {
@@ -449,10 +462,11 @@ namespace PSHistoryChecker
                 Height = 52
             };
 
+            // 필터 및 실시간 검색 컨트롤 바
             var controlRow = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 32,
+                Height = 34,
                 BackColor = Color.White
             };
 
@@ -468,7 +482,7 @@ namespace PSHistoryChecker
                 selectedDate = dtPicker.Value.Date;
                 btnDateFilter.Text = selectedDate.ToString("yyyy년 MM월 dd일");
                 btnDateFilter.AdjustFlexibleWidth();
-                RearrangeFilterChips();
+                RearrangeControls();
             };
 
             btnDateFilter = new TossChipButton
@@ -477,7 +491,7 @@ namespace PSHistoryChecker
                 HasChevron = true,
                 ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(51, 61, 75),
-                Location = new Point(0, 0)
+                Location = new Point(0, 1)
             };
             btnDateFilter.AdjustFlexibleWidth();
             btnDateFilter.Click += (s, e) =>
@@ -495,7 +509,7 @@ namespace PSHistoryChecker
                 ForeColor = Color.White
             };
             btnConfirm.AdjustFlexibleWidth();
-            btnConfirm.Click += (s, e) => FilterBySelectedDate(isInitialLoad: false);
+            btnConfirm.Click += (s, e) => FilterAndDisplay(isInitialLoad: false);
 
             btnRefresh = new TossChipButton
             {
@@ -506,22 +520,54 @@ namespace PSHistoryChecker
             btnRefresh.AdjustFlexibleWidth();
             btnRefresh.Click += (s, e) =>
             {
-                ScanRunningPowerShells();
                 LoadHistoryData();
-                FilterBySelectedDate(isInitialLoad: false);
+                FilterAndDisplay(isInitialLoad: false);
                 TossModalDialog.ShowWithOverlay(this, "새로고침 완료", "명령어 이력을 최신 상태로 갱신했습니다.");
+            };
+
+            // 검색창
+            var searchPanel = new Panel
+            {
+                Height = 32,
+                Width = 200,
+                BackColor = Color.FromArgb(242, 244, 246),
+                Padding = new Padding(10, 6, 10, 6)
+            };
+
+            txtSearch = new TextBox
+            {
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.FromArgb(242, 244, 246),
+                ForeColor = Color.FromArgb(25, 31, 40),
+                Font = new Font("맑은 고딕", 9.5F),
+                Dock = DockStyle.Fill
+            };
+            txtSearch.TextChanged += (s, e) => FilterAndDisplay(isInitialLoad: true);
+            searchPanel.Controls.Add(txtSearch);
+
+            // 실시간 건수 표시 라벨
+            lblItemCount = new Label
+            {
+                Text = "총 0개",
+                Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(78, 89, 104),
+                Dock = DockStyle.Right,
+                TextAlign = ContentAlignment.MiddleRight,
+                Width = 120
             };
 
             controlRow.Controls.Add(dtPicker);
             controlRow.Controls.Add(btnDateFilter);
             controlRow.Controls.Add(btnConfirm);
             controlRow.Controls.Add(btnRefresh);
+            controlRow.Controls.Add(searchPanel);
+            controlRow.Controls.Add(lblItemCount);
 
-            RearrangeFilterChips();
+            RearrangeControls();
 
             topArea.Controls.Add(controlRow);
             topArea.Controls.Add(lblDesc);
-            topArea.Controls.Add(lblTitle);
+            topArea.Controls.Add(titleRow);
 
             var bottomArea = new Panel
             {
@@ -616,9 +662,9 @@ namespace PSHistoryChecker
 
             var colTime = new DataGridViewTextBoxColumn
             {
-                HeaderText = "날짜 시간",
-                Width = 160,
-                SortMode = DataGridViewColumnSortMode.NotSortable
+                HeaderText = "날짜 시간 ▼",
+                Width = 175,
+                SortMode = DataGridViewColumnSortMode.Programmatic
             };
 
             var colAuth = new DataGridViewTextBoxColumn
@@ -632,7 +678,7 @@ namespace PSHistoryChecker
             {
                 HeaderText = "명령어",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                SortMode = DataGridViewColumnSortMode.NotSortable
+                SortMode = DataGridViewColumnSortMode.Programmatic
             };
 
             var colAction = new DataGridViewButtonColumn
@@ -644,19 +690,52 @@ namespace PSHistoryChecker
 
             gridCommands.Columns.AddRange(colTime, colAuth, colPreview, colAction);
 
+            // 컬럼 헤더 클릭 시 오름차순/내림차순 정렬
+            gridCommands.ColumnHeaderMouseClick += (s, e) =>
+            {
+                if (e.ColumnIndex == 0) // 날짜 시간
+                {
+                    sortTimeDesc = !sortTimeDesc;
+                    lastSortColumn = 0;
+                    gridCommands.Columns[0].HeaderText = sortTimeDesc ? "날짜 시간 ▼" : "날짜 시간 ▲";
+                    gridCommands.Columns[2].HeaderText = "명령어";
+                    SortAndBindGrid();
+                }
+                else if (e.ColumnIndex == 2) // 명령어
+                {
+                    sortCmdDesc = !sortCmdDesc;
+                    lastSortColumn = 2;
+                    gridCommands.Columns[2].HeaderText = sortCmdDesc ? "명령어 ▼" : "명령어 ▲";
+                    gridCommands.Columns[0].HeaderText = "날짜 시간";
+                    SortAndBindGrid();
+                }
+            };
+
             gridCommands.CellPainting += (s, e) =>
             {
-                // 1. 구분 컬럼 칩 렌더링 (관리자: 티파니 블루 민트색, 일반: 하늘색)
-                if (e.RowIndex >= 0 && e.ColumnIndex == 1)
+                if (e.RowIndex >= 0 && e.ColumnIndex == 1) // 구분 컬럼
                 {
-                    e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+                    // 행 선택 시 연하늘색(#E8F3FF), 평상 시 흰색으로 배경 처리
+                    bool isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
+                    Color cellBg = isSelected ? Color.FromArgb(232, 243, 255) : Color.White;
+
+                    using (var b = new SolidBrush(cellBg))
+                    {
+                        e.Graphics.FillRectangle(b, e.CellBounds);
+                    }
+
+                    // 하단 분할선
+                    using (var pen = new Pen(Color.FromArgb(242, 244, 246)))
+                    {
+                        e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    }
 
                     bool isAdmin = filteredEvents.Count > e.RowIndex && filteredEvents[e.RowIndex].IsAdmin;
                     string tagText = isAdmin ? "관리자" : "일반";
 
-                    // 티파니 앤 코 시그니처 민트색 (#81D8D0) / 일반 하늘색 (#E5F2FF)
-                    Color chipBg = isAdmin ? Color.FromArgb(129, 216, 208) : Color.FromArgb(229, 242, 255);
-                    Color textClr = isAdmin ? Color.White : Color.FromArgb(33, 115, 235);
+                    // 관리자: 티파니 앤 코 민트색 (#81D8D0) / 일반: 연한 회색 (#F2F4F6)
+                    Color chipBg = isAdmin ? Color.FromArgb(129, 216, 208) : Color.FromArgb(242, 244, 246);
+                    Color textClr = isAdmin ? Color.White : Color.FromArgb(25, 31, 40);
 
                     var tagRect = new Rectangle(e.CellBounds.X + 10, e.CellBounds.Y + 11, 56, 26);
                     using (var path = WinApiHelper.GetRoundPath(tagRect, 13))
@@ -679,10 +758,20 @@ namespace PSHistoryChecker
                     }
                     e.Handled = true;
                 }
-                // 2. 명령어 보기 버튼 렌더링
-                else if (e.RowIndex >= 0 && e.ColumnIndex == 3)
+                else if (e.RowIndex >= 0 && e.ColumnIndex == 3) // 명령어 보기 버튼
                 {
-                    e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+                    bool isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
+                    Color cellBg = isSelected ? Color.FromArgb(232, 243, 255) : Color.White;
+
+                    using (var b = new SolidBrush(cellBg))
+                    {
+                        e.Graphics.FillRectangle(b, e.CellBounds);
+                    }
+
+                    using (var pen = new Pen(Color.FromArgb(242, 244, 246)))
+                    {
+                        e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                    }
 
                     var btnRect = new Rectangle(e.CellBounds.X + 10, e.CellBounds.Y + 8, e.CellBounds.Width - 20, 32);
                     using (var path = WinApiHelper.GetRoundPath(btnRect, 16))
@@ -726,27 +815,26 @@ namespace PSHistoryChecker
             this.Controls.Add(rootPanel);
         }
 
-        private void RearrangeFilterChips()
+        private void RearrangeControls()
         {
             int spacing = 6;
-            btnConfirm.Location = new Point(btnDateFilter.Right + spacing, 0);
-            btnRefresh.Location = new Point(btnConfirm.Right + spacing, 0);
+            btnConfirm.Location = new Point(btnDateFilter.Right + spacing, 1);
+            btnRefresh.Location = new Point(btnConfirm.Right + spacing, 1);
+
+            var searchPanel = txtSearch.Parent;
+            if (searchPanel != null)
+            {
+                searchPanel.Location = new Point(btnRefresh.Right + 12, 1);
+            }
         }
 
-        private void ScanRunningPowerShells()
+        private void ShowAboutDialog()
         {
-            try
-            {
-                foreach (var proc in System.Diagnostics.Process.GetProcesses())
-                {
-                    if (proc.ProcessName.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
-                        proc.ProcessName.Equals("pwsh", StringComparison.OrdinalIgnoreCase))
-                    {
-                        elevationCache[proc.Id] = WinApiHelper.CheckIsProcessElevated(proc.Id);
-                    }
-                }
-            }
-            catch { }
+            string info = "프로그램 : Powershell 입력 명령어 체크리스트\r\n" +
+                          "최종 버전 : 1.0\r\n" +
+                          "최종 수정 날짜 : 26.09.04\r\n" +
+                          "제작자 : kkh";
+            TossModalDialog.ShowWithOverlay(this, "제품 정보", info);
         }
 
         private bool IsSystemInternalNoise(string cmd)
@@ -771,10 +859,47 @@ namespace PSHistoryChecker
             return false;
         }
 
+        // 실시간 활성 파워쉘 프로세스의 관리자 여부 매핑
+        private Dictionary<int, bool> GetActivePowerShellElevations()
+        {
+            var dict = new Dictionary<int, bool>();
+            try
+            {
+                foreach (var proc in System.Diagnostics.Process.GetProcesses())
+                {
+                    try
+                    {
+                        if (proc.ProcessName.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
+                            proc.ProcessName.Equals("pwsh", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bool isAdmin = false;
+                            // 1. 창 타이틀 검사 (가장 확실한 직관적 기준)
+                            if (proc.MainWindowTitle.Contains("관리자") || proc.MainWindowTitle.Contains("Administrator"))
+                            {
+                                isAdmin = true;
+                            }
+                            else
+                            {
+                                // 2. 프로세스 토큰 Elevation 검사
+                                isAdmin = WinApiHelper.CheckIsProcessElevated(proc.Handle);
+                            }
+                            dict[proc.Id] = isAdmin;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return dict;
+        }
+
         private void LoadHistoryData()
         {
             allEvents.Clear();
+            var activePsMap = GetActivePowerShellElevations();
+            bool hasAnyActiveAdmin = activePsMap.ContainsValue(true);
 
+            // 1. 이벤트 로그(4104) 분석
             try
             {
                 string query = "*[System[(EventID=4104)]]";
@@ -799,34 +924,25 @@ namespace PSHistoryChecker
                         if (!string.IsNullOrWhiteSpace(clean) && !IsSystemInternalNoise(clean))
                         {
                             bool isAdmin = false;
-                            if (record.ProcessId.HasValue)
+                            if (record.ProcessId.HasValue && activePsMap.TryGetValue(record.ProcessId.Value, out bool adminStatus))
                             {
-                                int pid = record.ProcessId.Value;
-                                if (!elevationCache.TryGetValue(pid, out isAdmin))
-                                {
-                                    isAdmin = WinApiHelper.CheckIsProcessElevated(pid);
-                                    elevationCache[pid] = isAdmin;
-                                }
+                                isAdmin = adminStatus;
                             }
-
-                            if (!isAdmin && record.UserId != null && record.UserId.Value.StartsWith("S-1-5-18"))
+                            else if (record.UserId != null && record.UserId.Value.StartsWith("S-1-5-18"))
                             {
                                 isAdmin = true;
                             }
 
-                            allEvents.Add(new HistoryEntry
-                            {
-                                Time = time,
-                                FullCommand = clean,
-                                IsAdmin = isAdmin
-                            });
+                            allEvents.Add(new HistoryEntry { Time = time, FullCommand = clean, IsAdmin = isAdmin });
                         }
                     }
                 }
             }
             catch { }
 
-            LoadConsoleHistoryFile();
+            // 2. 콘솔 히스토리 로드
+            LoadConsoleHistoryFile(hasAnyActiveAdmin);
+
             DeduplicateAndSortEvents();
         }
 
@@ -880,7 +996,7 @@ namespace PSHistoryChecker
             return commands;
         }
 
-        private void LoadConsoleHistoryFile()
+        private void LoadConsoleHistoryFile(bool hasAnyActiveAdmin)
         {
             try
             {
@@ -911,11 +1027,15 @@ namespace PSHistoryChecker
                     {
                         if (!string.IsNullOrWhiteSpace(cmd) && !IsSystemInternalNoise(cmd))
                         {
+                            // 이벤트 로그에 이미 관리자 플래그가 매핑되어 있는지 확인
+                            var match = allEvents.Find(e => e.FullCommand.Equals(cmd, StringComparison.OrdinalIgnoreCase));
+                            bool isAdmin = match != null ? match.IsAdmin : false;
+
                             allEvents.Add(new HistoryEntry
                             {
                                 Time = modTime.AddSeconds(-offsetSeconds),
                                 FullCommand = cmd,
-                                IsAdmin = false
+                                IsAdmin = isAdmin
                             });
                             offsetSeconds++;
                         }
@@ -943,9 +1063,44 @@ namespace PSHistoryChecker
             allEvents = unique;
         }
 
-        private void FilterBySelectedDate(bool isInitialLoad = false)
+        private void FilterAndDisplay(bool isInitialLoad = false)
         {
-            filteredEvents = allEvents.FindAll(x => x.Time.Date == selectedDate);
+            string keyword = txtSearch?.Text.Trim() ?? "";
+
+            filteredEvents = allEvents.FindAll(x =>
+            {
+                if (x.Time.Date != selectedDate) return false;
+                if (!string.IsNullOrEmpty(keyword) && !x.FullCommand.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                return true;
+            });
+
+            SortAndBindGrid();
+
+            if (lblItemCount != null)
+            {
+                lblItemCount.Text = string.IsNullOrEmpty(keyword) ? $"총 {filteredEvents.Count}개" : $"검색 {filteredEvents.Count}개";
+            }
+
+            if (filteredEvents.Count == 0 && !isInitialLoad && string.IsNullOrEmpty(keyword))
+            {
+                TossModalDialog.ShowWithOverlay(this, "조회 결과", "선택하신 날짜에 기록된 명령어가 없습니다.");
+            }
+        }
+
+        private void SortAndBindGrid()
+        {
+            if (lastSortColumn == 0)
+            {
+                filteredEvents.Sort((a, b) => sortTimeDesc ? b.Time.CompareTo(a.Time) : a.Time.CompareTo(b.Time));
+            }
+            else if (lastSortColumn == 2)
+            {
+                filteredEvents.Sort((a, b) => sortCmdDesc ? string.Compare(b.FullCommand, a.FullCommand, StringComparison.OrdinalIgnoreCase)
+                                                           : string.Compare(a.FullCommand, b.FullCommand, StringComparison.OrdinalIgnoreCase));
+            }
 
             gridCommands.Rows.Clear();
             foreach (var item in filteredEvents)
@@ -955,11 +1110,6 @@ namespace PSHistoryChecker
 
                 string preview = firstLine.Length > 55 ? firstLine.Substring(0, 55) + "..." : firstLine;
                 gridCommands.Rows.Add(item.Time.ToString("yyyy-MM-dd HH:mm:ss"), item.IsAdmin ? "관리자" : "일반", preview, "명령어 보기");
-            }
-
-            if (filteredEvents.Count == 0 && !isInitialLoad)
-            {
-                TossModalDialog.ShowWithOverlay(this, "조회 결과", "선택하신 날짜에 기록된 명령어가 없습니다.");
             }
         }
 
@@ -995,7 +1145,7 @@ namespace PSHistoryChecker
             }
 
             Clipboard.SetText(sb.ToString());
-            TossModalDialog.ShowWithOverlay(this, "클립보드 복사", "선택된 날짜의 전체 명령어가 복사되었습니다.");
+            TossModalDialog.ShowWithOverlay(this, "클립보드 복사", "현재 표시된 전체 명령어가 복사되었습니다.");
         }
 
         private void SaveAllToFile()
@@ -1025,7 +1175,6 @@ namespace PSHistoryChecker
         }
     }
 
-    // 상세 보기 모달
     public class CommandDetailModal : Form
     {
         public CommandDetailModal(DateTime time, string command, bool isAdmin)
@@ -1054,7 +1203,6 @@ namespace PSHistoryChecker
                 AutoSize = true
             };
 
-            // 상단 우측 버튼들의 높이를 32px로 반듯하게 고정 배치
             int btnY = (topPanel.Height - 32) / 2;
 
             var btnSave = new TossChipButton
