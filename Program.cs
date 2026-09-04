@@ -344,7 +344,7 @@ namespace PSHistoryChecker
 
         private bool sortTimeDesc = true;
         private bool sortCmdDesc = false;
-        private int lastSortColumn = 0; // 0: 시간, 1: 명령어
+        private int lastSortColumn = 0;
 
         public MainForm()
         {
@@ -431,12 +431,13 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
+            // 날짜 변경 시 발생하는 선 잔상 방지: 이벤트 처리 후 즉각 Visible = false 설정
             dtPicker = new DateTimePicker
             {
                 Format = DateTimePickerFormat.Custom,
                 CustomFormat = "yyyy년 MM월 dd일",
                 Visible = false,
-                Location = new Point(0, 0)
+                Size = new Size(160, 24)
             };
             dtPicker.ValueChanged += (s, e) =>
             {
@@ -444,7 +445,10 @@ namespace PSHistoryChecker
                 btnDateFilter.Text = selectedDate.ToString("yyyy년 MM월 dd일");
                 btnDateFilter.AdjustFlexibleWidth();
                 RearrangeControls();
+                dtPicker.Visible = false;
             };
+            dtPicker.CloseUp += (s, e) => { dtPicker.Visible = false; };
+            dtPicker.LostFocus += (s, e) => { dtPicker.Visible = false; };
 
             btnDateFilter = new TossChipButton
             {
@@ -457,8 +461,9 @@ namespace PSHistoryChecker
             btnDateFilter.AdjustFlexibleWidth();
             btnDateFilter.Click += (s, e) =>
             {
-                dtPicker.Location = new Point(btnDateFilter.Left, btnDateFilter.Bottom);
+                dtPicker.Location = new Point(btnDateFilter.Left, btnDateFilter.Bottom + 2);
                 dtPicker.Visible = true;
+                dtPicker.BringToFront();
                 dtPicker.Focus();
                 SendKeys.Send("%{DOWN}");
             };
@@ -589,6 +594,14 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
+            // 테이블 둘레에 1px 소프트 그레이 테두리를 둘러 배경 대비 강화
+            var gridBorderPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(1),
+                BackColor = Color.FromArgb(229, 232, 235)
+            };
+
             gridCommands = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -640,12 +653,11 @@ namespace PSHistoryChecker
                 FlatStyle = FlatStyle.Flat
             };
 
-            // 구분 컬럼 없이 3개 열 구성
             gridCommands.Columns.AddRange(colTime, colPreview, colAction);
 
             gridCommands.ColumnHeaderMouseClick += (s, e) =>
             {
-                if (e.ColumnIndex == 0) // 날짜 시간
+                if (e.ColumnIndex == 0)
                 {
                     sortTimeDesc = !sortTimeDesc;
                     lastSortColumn = 0;
@@ -653,7 +665,7 @@ namespace PSHistoryChecker
                     gridCommands.Columns[1].HeaderText = "명령어";
                     SortAndBindGrid();
                 }
-                else if (e.ColumnIndex == 1) // 명령어
+                else if (e.ColumnIndex == 1)
                 {
                     sortCmdDesc = !sortCmdDesc;
                     lastSortColumn = 1;
@@ -665,7 +677,7 @@ namespace PSHistoryChecker
 
             gridCommands.CellPainting += (s, e) =>
             {
-                if (e.RowIndex >= 0 && e.ColumnIndex == 2) // 명령어 보기 버튼
+                if (e.RowIndex >= 0 && e.ColumnIndex == 2)
                 {
                     bool isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
                     Color cellBg = isSelected ? Color.FromArgb(232, 243, 255) : Color.White;
@@ -712,7 +724,8 @@ namespace PSHistoryChecker
                 if (e.RowIndex >= 0) OpenDetail(e.RowIndex);
             };
 
-            gridContainer.Controls.Add(gridCommands);
+            gridBorderPanel.Controls.Add(gridCommands);
+            gridContainer.Controls.Add(gridBorderPanel);
 
             cardPanel.Controls.Add(gridContainer);
             cardPanel.Controls.Add(bottomArea);
@@ -770,7 +783,6 @@ namespace PSHistoryChecker
         {
             allEvents.Clear();
 
-            // 1. 이벤트 로그(4104) 분석
             try
             {
                 string query = "*[System[(EventID=4104)]]";
@@ -801,10 +813,7 @@ namespace PSHistoryChecker
             }
             catch { }
 
-            // 2. 콘솔 히스토리 로드
             LoadConsoleHistoryFile();
-
-            // 시간 내림차순 정렬
             allEvents.Sort((a, b) => b.Time.CompareTo(a.Time));
         }
 
@@ -1008,6 +1017,10 @@ namespace PSHistoryChecker
 
     public class CommandDetailModal : Form
     {
+        private TossChipButton btnSave = null!;
+        private TossChipButton btnCopy = null!;
+        private Panel topPanel = null!;
+
         public CommandDetailModal(DateTime time, string command)
         {
             this.FormBorderStyle = FormBorderStyle.None;
@@ -1017,7 +1030,7 @@ namespace PSHistoryChecker
             this.BackColor = Color.White;
             this.Padding = new Padding(24);
 
-            var topPanel = new Panel
+            topPanel = new Panel
             {
                 Dock = DockStyle.Top,
                 Height = 44,
@@ -1033,9 +1046,7 @@ namespace PSHistoryChecker
                 AutoSize = true
             };
 
-            int btnY = (topPanel.Height - 32) / 2;
-
-            var btnSave = new TossChipButton
+            btnSave = new TossChipButton
             {
                 Text = "저장하기",
                 ChipColor = Color.FromArgb(49, 130, 246),
@@ -1043,8 +1054,6 @@ namespace PSHistoryChecker
                 Height = 32
             };
             btnSave.AdjustFlexibleWidth();
-            btnSave.Location = new Point(topPanel.Width - btnSave.Width, btnY);
-            btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSave.Click += (s, e) =>
             {
                 using (var sfd = new SaveFileDialog())
@@ -1059,9 +1068,7 @@ namespace PSHistoryChecker
                 }
             };
 
-            var spacer = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Color.White };
-
-            var btnCopy = new TossChipButton
+            btnCopy = new TossChipButton
             {
                 Text = "복사하기",
                 ChipColor = Color.FromArgb(242, 244, 246),
@@ -1069,17 +1076,22 @@ namespace PSHistoryChecker
                 Height = 32
             };
             btnCopy.AdjustFlexibleWidth();
-            btnCopy.Location = new Point(btnSave.Left - btnCopy.Width - 8, btnY);
-            btnCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnCopy.Click += (s, e) =>
             {
                 Clipboard.SetText(command);
                 TossModalDialog.ShowWithOverlay(this, "복사 완료", "명령어가 클립보드에 복사되었습니다.");
             };
 
+            // 창 크기 및 패딩에 맞춰 우측 8px 여백을 유지하도록 실시간 위치 계산 (버튼 잘림 방지)
+            topPanel.Resize += (s, e) =>
+            {
+                int btnY = (topPanel.Height - 32) / 2;
+                btnSave.Location = new Point(topPanel.Width - btnSave.Width - 8, btnY);
+                btnCopy.Location = new Point(btnSave.Left - btnCopy.Width - 8, btnY);
+            };
+
             topPanel.Controls.Add(lblTitle);
             topPanel.Controls.Add(btnCopy);
-            topPanel.Controls.Add(spacer);
             topPanel.Controls.Add(btnSave);
 
             var txtContent = new TextBox
@@ -1124,6 +1136,11 @@ namespace PSHistoryChecker
         {
             base.OnLoad(e);
             WinApiHelper.ApplyRoundRegion(this, 20);
+
+            // 최초 로드 시 버튼 위치 재배치
+            int btnY = (topPanel.Height - 32) / 2;
+            btnSave.Location = new Point(topPanel.Width - btnSave.Width - 8, btnY);
+            btnCopy.Location = new Point(btnSave.Left - btnCopy.Width - 8, btnY);
         }
 
         protected override void OnPaint(PaintEventArgs e)
