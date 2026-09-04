@@ -4,7 +4,6 @@ using System.Diagnostics.Eventing.Reader;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
@@ -30,37 +29,13 @@ namespace PSHistoryChecker
         }
     }
 
-    // 창 둥근 모서리 헬퍼
-    internal static class WindowRoundHelper
-    {
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-        [DllImport("gdi32.dll", EntryPoint = "CreateRoundRectRgn")]
-        private static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
-
-        public static void ApplyRoundedCorners(Form form, int radius = 24)
-        {
-            try
-            {
-                int preference = 2; // DWMWCP_ROUND (Windows 11)
-                DwmSetWindowAttribute(form.Handle, 33, ref preference, sizeof(int));
-            }
-            catch { }
-
-            try
-            {
-                form.Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, form.Width + 1, form.Height + 1, radius, radius));
-            }
-            catch { }
-        }
-    }
-
-    // 안티에일리어싱 매끄러운 칩 버튼 (Region 없이 부드러운 벡터 렌더링)
-    public class TossChipButton : Button
+    // "명령어 보기"와 동일한 원리로 렌더링되는 초고화질 안티에일리어싱 칩 버튼
+    public class TossChipButton : Control
     {
         public bool HasChevron { get; set; } = false;
         private Color _chipColor = Color.FromArgb(49, 130, 246);
+        private bool _isHovered = false;
+        private bool _isPressed = false;
 
         public Color ChipColor
         {
@@ -70,20 +45,20 @@ namespace PSHistoryChecker
 
         public TossChipButton()
         {
-            this.SetStyle(ControlStyles.SupportsTransparentBackColor |
-                          ControlStyles.UserPaint |
+            this.SetStyle(ControlStyles.UserPaint |
                           ControlStyles.AllPaintingInWmPaint |
-                          ControlStyles.OptimizedDoubleBuffer, true);
+                          ControlStyles.OptimizedDoubleBuffer |
+                          ControlStyles.ResizeRedraw, true);
 
-            this.FlatStyle = FlatStyle.Flat;
-            this.FlatAppearance.BorderSize = 0;
-            this.FlatAppearance.MouseDownBackColor = Color.Transparent;
-            this.FlatAppearance.MouseOverBackColor = Color.Transparent;
-            this.BackColor = Color.Transparent;
             this.Cursor = Cursors.Hand;
             this.Height = 32;
-            this.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            this.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
         }
+
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _isHovered = true; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _isHovered = false; _isPressed = false; Invalidate(); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) { _isPressed = true; Invalidate(); } }
+        protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); _isPressed = false; Invalidate(); }
 
         public void AdjustFlexibleWidth()
         {
@@ -92,7 +67,7 @@ namespace PSHistoryChecker
                 var size = g.MeasureString(this.Text, this.Font);
                 if (HasChevron)
                 {
-                    this.Width = (int)Math.Ceiling(size.Width) + 12 + 1 + 8 + 10;
+                    this.Width = (int)Math.Ceiling(size.Width) + 12 + 1 + 8 + 12;
                 }
                 else
                 {
@@ -103,24 +78,41 @@ namespace PSHistoryChecker
 
         protected override void OnPaint(PaintEventArgs pevent)
         {
-            pevent.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            pevent.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            var g = pevent.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            var rect = new Rectangle(0, 0, this.Width, this.Height);
-            int radius = 16;
+            // 부모 컨트롤의 배경색으로 먼저 깨끗하게 채워 모서리 검은 잔상 100% 방지
+            Color parentBg = this.Parent?.BackColor ?? Color.White;
+            g.Clear(parentBg);
+
+            // 마우스 인터랙션 피드백
+            Color drawColor = _chipColor;
+            if (_isPressed)
+            {
+                drawColor = ControlPaint.Dark(_chipColor, 0.06f);
+            }
+            else if (_isHovered)
+            {
+                drawColor = ControlPaint.Light(_chipColor, 0.06f);
+            }
+
+            var rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+            int radius = rect.Height / 2;
 
             using (var path = GetCapsulePath(rect, radius))
             {
-                using (var brush = new SolidBrush(ChipColor))
+                using (var brush = new SolidBrush(drawColor))
                 {
-                    pevent.Graphics.FillPath(brush, path);
+                    g.FillPath(brush, path);
                 }
 
                 if (HasChevron)
                 {
-                    var textRect = new Rectangle(12, 0, this.Width - 31, this.Height);
+                    var textRect = new Rectangle(12, 0, this.Width - 32, this.Height);
                     TextRenderer.DrawText(
-                        pevent.Graphics,
+                        g,
                         this.Text,
                         this.Font,
                         textRect,
@@ -128,11 +120,13 @@ namespace PSHistoryChecker
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter
                     );
 
-                    int chevronRight = this.Width - 10;
+                    int chevronRight = this.Width - 12;
                     int chevronY = this.Height / 2;
-                    using (var pen = new Pen(this.ForeColor, 1.6F))
+                    using (var pen = new Pen(this.ForeColor, 1.8F))
                     {
-                        pevent.Graphics.DrawLines(pen, new Point[] {
+                        pen.StartCap = LineCap.Round;
+                        pen.EndCap = LineCap.Round;
+                        g.DrawLines(pen, new Point[] {
                             new Point(chevronRight - 8, chevronY - 2),
                             new Point(chevronRight - 4, chevronY + 2),
                             new Point(chevronRight, chevronY - 2)
@@ -142,10 +136,10 @@ namespace PSHistoryChecker
                 else
                 {
                     TextRenderer.DrawText(
-                        pevent.Graphics,
+                        g,
                         this.Text,
                         this.Font,
-                        rect,
+                        new Rectangle(0, 0, this.Width, this.Height),
                         this.ForeColor,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
                     );
@@ -183,7 +177,7 @@ namespace PSHistoryChecker
         }
     }
 
-    // 동글동글한 모달 알림창
+    // 깔끔한 1픽셀 테두리가 적용된 모달 알림창
     public class TossModalDialog : Form
     {
         public TossModalDialog(string title, string message)
@@ -229,10 +223,14 @@ namespace PSHistoryChecker
             this.Controls.Add(btnConfirm);
         }
 
-        protected override void OnLoad(EventArgs e)
+        protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnLoad(e);
-            WindowRoundHelper.ApplyRoundedCorners(this, 24);
+            base.OnPaint(e);
+            // 깔끔한 1픽셀 외곽선 렌더링
+            using (var pen = new Pen(Color.FromArgb(220, 225, 232), 1))
+            {
+                e.Graphics.DrawRectangle(pen, 0, 0, this.Width - 1, this.Height - 1);
+            }
         }
 
         public static void ShowWithOverlay(Form owner, string title, string message)
@@ -249,14 +247,14 @@ namespace PSHistoryChecker
         }
     }
 
-    // 프로그램 실행 시 나오는 동글동글한 스플래시 창
+    // 엑셀 취합 프로그램 스타일의 시작 대기 팝업
     public class SplashForm : Form
     {
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(390, 130);
+            this.Size = new Size(380, 130);
             this.BackColor = Color.White;
             this.Padding = new Padding(20);
             this.TopMost = true;
@@ -264,10 +262,10 @@ namespace PSHistoryChecker
             var lblTitle = new Label
             {
                 Text = "Powershell 입력 명령어 체크리스트",
-                Font = new Font("맑은 고딕", 11.5F, FontStyle.Bold),
+                Font = new Font("맑은 고딕", 12F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(25, 31, 40),
                 Dock = DockStyle.Top,
-                Height = 30,
+                Height = 32,
                 TextAlign = ContentAlignment.MiddleCenter
             };
 
@@ -296,10 +294,13 @@ namespace PSHistoryChecker
             this.Controls.Add(lblTitle);
         }
 
-        protected override void OnLoad(EventArgs e)
+        protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnLoad(e);
-            WindowRoundHelper.ApplyRoundedCorners(this, 24);
+            base.OnPaint(e);
+            using (var pen = new Pen(Color.FromArgb(220, 225, 232), 1))
+            {
+                e.Graphics.DrawRectangle(pen, 0, 0, this.Width - 1, this.Height - 1);
+            }
         }
     }
 
@@ -351,7 +352,8 @@ namespace PSHistoryChecker
             {
                 Dock = DockStyle.Top,
                 Height = 150,
-                Padding = new Padding(0, 0, 0, 8)
+                Padding = new Padding(0, 0, 0, 8),
+                BackColor = Color.White
             };
 
             var lblTitle = new Label
@@ -376,7 +378,8 @@ namespace PSHistoryChecker
             var controlRow = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = 32
+                Height = 32,
+                BackColor = Color.White
             };
 
             dtPicker = new DateTimePicker
@@ -449,13 +452,15 @@ namespace PSHistoryChecker
             {
                 Dock = DockStyle.Bottom,
                 Height = 90,
-                Padding = new Padding(0, 4, 0, 0)
+                Padding = new Padding(0, 4, 0, 0),
+                BackColor = Color.White
             };
 
             var actionRow = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 32
+                Height = 32,
+                BackColor = Color.White
             };
 
             btnSaveAll = new TossChipButton
@@ -468,7 +473,7 @@ namespace PSHistoryChecker
             btnSaveAll.AdjustFlexibleWidth();
             btnSaveAll.Click += (s, e) => SaveAllToFile();
 
-            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 };
+            var spacer = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Color.White };
 
             btnCopyAll = new TossChipButton
             {
@@ -500,7 +505,8 @@ namespace PSHistoryChecker
             var gridContainer = new Panel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(0, 10, 0, 10)
+                Padding = new Padding(0, 10, 0, 10),
+                BackColor = Color.White
             };
 
             gridCommands = new DataGridView
@@ -521,7 +527,6 @@ namespace PSHistoryChecker
                 EnableHeadersVisualStyles = false
             };
 
-            // 헤더 클릭 시 색상 변경 방지
             gridCommands.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251);
             gridCommands.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(107, 118, 132);
             gridCommands.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(249, 250, 251);
@@ -530,7 +535,6 @@ namespace PSHistoryChecker
             gridCommands.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
             gridCommands.ColumnHeadersHeight = 38;
 
-            // 클릭 시 연한 하늘색으로 선택 표시
             gridCommands.DefaultCellStyle.SelectionBackColor = Color.FromArgb(232, 243, 255);
             gridCommands.DefaultCellStyle.SelectionForeColor = Color.FromArgb(25, 31, 40);
             gridCommands.DefaultCellStyle.Font = new Font("맑은 고딕", 9.5F);
@@ -570,6 +574,7 @@ namespace PSHistoryChecker
                         using (var brush = new SolidBrush(Color.FromArgb(49, 130, 246)))
                         {
                             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
                             e.Graphics.FillPath(brush, path);
                         }
 
@@ -864,7 +869,7 @@ namespace PSHistoryChecker
         }
     }
 
-    // 동글동글한 명령어 보기 상세 모달
+    // 명령어 보기 상세 모달
     public class CommandDetailModal : Form
     {
         public CommandDetailModal(DateTime time, string command)
@@ -879,7 +884,8 @@ namespace PSHistoryChecker
             var topPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 44
+                Height = 44,
+                BackColor = Color.White
             };
 
             var lblTitle = new Label
@@ -913,7 +919,7 @@ namespace PSHistoryChecker
                 }
             };
 
-            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 };
+            var spacer = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Color.White };
 
             var btnCopy = new TossChipButton
             {
@@ -952,7 +958,8 @@ namespace PSHistoryChecker
             {
                 Dock = DockStyle.Bottom,
                 Height = 42,
-                Padding = new Padding(0, 10, 0, 0)
+                Padding = new Padding(0, 10, 0, 0),
+                BackColor = Color.White
             };
 
             var btnClose = new TossChipButton
@@ -971,10 +978,13 @@ namespace PSHistoryChecker
             this.Controls.Add(bottomPanel);
         }
 
-        protected override void OnLoad(EventArgs e)
+        protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnLoad(e);
-            WindowRoundHelper.ApplyRoundedCorners(this, 24);
+            base.OnPaint(e);
+            using (var pen = new Pen(Color.FromArgb(220, 225, 232), 1))
+            {
+                e.Graphics.DrawRectangle(pen, 0, 0, this.Width - 1, this.Height - 1);
+            }
         }
     }
 
