@@ -4,6 +4,7 @@ using System.Diagnostics.Eventing.Reader;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
@@ -20,7 +21,7 @@ namespace PSHistoryChecker
             {
                 splash.Show();
                 splash.Refresh();
-                System.Threading.Thread.Sleep(750);
+                System.Threading.Thread.Sleep(800);
 
                 var mainForm = new MainForm();
                 splash.Close();
@@ -29,35 +30,59 @@ namespace PSHistoryChecker
         }
     }
 
-    // 딤 오버레이 (Dim Overlay)
-    public class DimOverlayForm : Form
+    // 창 둥근 모서리 헬퍼
+    internal static class WindowRoundHelper
     {
-        public DimOverlayForm(Form parent)
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("gdi32.dll", EntryPoint = "CreateRoundRectRgn")]
+        private static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
+
+        public static void ApplyRoundedCorners(Form form, int radius = 24)
         {
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.ShowInTaskbar = false;
-            this.StartPosition = FormStartPosition.Manual;
-            this.Location = parent.Location;
-            this.Size = parent.Size;
-            this.BackColor = Color.Black;
-            this.Opacity = 0.40;
-            this.Owner = parent;
+            try
+            {
+                int preference = 2; // DWMWCP_ROUND (Windows 11)
+                DwmSetWindowAttribute(form.Handle, 33, ref preference, sizeof(int));
+            }
+            catch { }
+
+            try
+            {
+                form.Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, form.Width + 1, form.Height + 1, radius, radius));
+            }
+            catch { }
         }
     }
 
-    // 가이드 규격 칩 버튼 (Height: 32px, Padding: Left 12 / Right 12, Flexible Width)
+    // 안티에일리어싱 매끄러운 칩 버튼 (Region 없이 부드러운 벡터 렌더링)
     public class TossChipButton : Button
     {
         public bool HasChevron { get; set; } = false;
+        private Color _chipColor = Color.FromArgb(49, 130, 246);
+
+        public Color ChipColor
+        {
+            get => _chipColor;
+            set { _chipColor = value; Invalidate(); }
+        }
 
         public TossChipButton()
         {
+            this.SetStyle(ControlStyles.SupportsTransparentBackColor |
+                          ControlStyles.UserPaint |
+                          ControlStyles.AllPaintingInWmPaint |
+                          ControlStyles.OptimizedDoubleBuffer, true);
+
             this.FlatStyle = FlatStyle.Flat;
             this.FlatAppearance.BorderSize = 0;
+            this.FlatAppearance.MouseDownBackColor = Color.Transparent;
+            this.FlatAppearance.MouseOverBackColor = Color.Transparent;
+            this.BackColor = Color.Transparent;
             this.Cursor = Cursors.Hand;
-            this.Height = 32; // 가이드 규격 32px 고정
+            this.Height = 32;
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
-            this.DoubleBuffered = true;
         }
 
         public void AdjustFlexibleWidth()
@@ -67,12 +92,10 @@ namespace PSHistoryChecker
                 var size = g.MeasureString(this.Text, this.Font);
                 if (HasChevron)
                 {
-                    // Filter / Input 규격: 좌 12px + 텍스트 + 간격 1px + 쉐브론(약 8px) + 우 10px
                     this.Width = (int)Math.Ceiling(size.Width) + 12 + 1 + 8 + 10;
                 }
                 else
                 {
-                    // Select 규격: 좌 12px + 텍스트 + 우 12px
                     this.Width = (int)Math.Ceiling(size.Width) + 24;
                 }
             }
@@ -80,24 +103,21 @@ namespace PSHistoryChecker
 
         protected override void OnPaint(PaintEventArgs pevent)
         {
-            base.OnPaint(pevent);
             pevent.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            pevent.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
             var rect = new Rectangle(0, 0, this.Width, this.Height);
-            int radius = 16; // 32px 높이 기준 완전한 캡슐 라운딩 (r = 16)
+            int radius = 16;
 
             using (var path = GetCapsulePath(rect, radius))
             {
-                this.Region = new Region(path);
-
-                using (var brush = new SolidBrush(this.BackColor))
+                using (var brush = new SolidBrush(ChipColor))
                 {
                     pevent.Graphics.FillPath(brush, path);
                 }
 
                 if (HasChevron)
                 {
-                    // 좌측 12px 기준 텍스트 출력
                     var textRect = new Rectangle(12, 0, this.Width - 31, this.Height);
                     TextRenderer.DrawText(
                         pevent.Graphics,
@@ -108,10 +128,9 @@ namespace PSHistoryChecker
                         TextFormatFlags.Left | TextFormatFlags.VerticalCenter
                     );
 
-                    // 우측 10px 마진 쉐브론 화살표(∨) 렌더링
                     int chevronRight = this.Width - 10;
                     int chevronY = this.Height / 2;
-                    using (var pen = new Pen(this.ForeColor, 1.5F))
+                    using (var pen = new Pen(this.ForeColor, 1.6F))
                     {
                         pevent.Graphics.DrawLines(pen, new Point[] {
                             new Point(chevronRight - 8, chevronY - 2),
@@ -148,7 +167,23 @@ namespace PSHistoryChecker
         }
     }
 
-    // 모달 알림창
+    // 딤 오버레이
+    public class DimOverlayForm : Form
+    {
+        public DimOverlayForm(Form parent)
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.ShowInTaskbar = false;
+            this.StartPosition = FormStartPosition.Manual;
+            this.Location = parent.Location;
+            this.Size = parent.Size;
+            this.BackColor = Color.Black;
+            this.Opacity = 0.35;
+            this.Owner = parent;
+        }
+    }
+
+    // 동글동글한 모달 알림창
     public class TossModalDialog : Form
     {
         public TossModalDialog(string title, string message)
@@ -156,21 +191,14 @@ namespace PSHistoryChecker
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterParent;
             this.ShowInTaskbar = false;
-            this.Size = new Size(380, 180);
-            this.BackColor = Color.FromArgb(235, 238, 242);
-            this.Padding = new Padding(1);
-
-            var innerPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.White,
-                Padding = new Padding(20)
-            };
+            this.Size = new Size(380, 185);
+            this.BackColor = Color.White;
+            this.Padding = new Padding(24);
 
             var lblTitle = new Label
             {
                 Text = title,
-                Font = new Font("맑은 고딕", 12F, FontStyle.Bold),
+                Font = new Font("맑은 고딕", 12.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(25, 31, 40),
                 Dock = DockStyle.Top,
                 Height = 32,
@@ -189,17 +217,22 @@ namespace PSHistoryChecker
             var btnConfirm = new TossChipButton
             {
                 Text = "확인",
-                BackColor = Color.FromArgb(49, 130, 246),
+                ChipColor = Color.FromArgb(49, 130, 246),
                 ForeColor = Color.White,
                 Dock = DockStyle.Bottom,
-                Height = 32
+                Height = 36
             };
             btnConfirm.Click += (s, e) => { this.DialogResult = DialogResult.OK; this.Close(); };
 
-            innerPanel.Controls.Add(lblMsg);
-            innerPanel.Controls.Add(lblTitle);
-            innerPanel.Controls.Add(btnConfirm);
-            this.Controls.Add(innerPanel);
+            this.Controls.Add(lblMsg);
+            this.Controls.Add(lblTitle);
+            this.Controls.Add(btnConfirm);
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            WindowRoundHelper.ApplyRoundedCorners(this, 24);
         }
 
         public static void ShowWithOverlay(Form owner, string title, string message)
@@ -216,30 +249,57 @@ namespace PSHistoryChecker
         }
     }
 
-    // 로딩 스플래시 창
+    // 프로그램 실행 시 나오는 동글동글한 스플래시 창
     public class SplashForm : Form
     {
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(380, 100);
-            this.BackColor = Color.FromArgb(230, 233, 237);
-            this.Padding = new Padding(1);
+            this.Size = new Size(390, 130);
+            this.BackColor = Color.White;
+            this.Padding = new Padding(20);
             this.TopMost = true;
 
-            var panel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-            var lbl = new Label
+            var lblTitle = new Label
             {
-                Text = "프로그램이 실행중이니 잠시만 기다려 주세요",
-                Font = new Font("맑은 고딕", 11F, FontStyle.Bold),
+                Text = "Powershell 입력 명령어 체크리스트",
+                Font = new Font("맑은 고딕", 11.5F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(25, 31, 40),
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                Height = 30,
                 TextAlign = ContentAlignment.MiddleCenter
             };
 
-            panel.Controls.Add(lbl);
-            this.Controls.Add(panel);
+            var lblSub = new Label
+            {
+                Text = "프로그램을 실행 중입니다...",
+                Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(49, 130, 246),
+                Dock = DockStyle.Top,
+                Height = 26,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            var lblWait = new Label
+            {
+                Text = "잠시만 기다려 주세요.",
+                Font = new Font("맑은 고딕", 8.5F),
+                ForeColor = Color.FromArgb(142, 151, 163),
+                Dock = DockStyle.Bottom,
+                Height = 22,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+
+            this.Controls.Add(lblWait);
+            this.Controls.Add(lblSub);
+            this.Controls.Add(lblTitle);
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            WindowRoundHelper.ApplyRoundedCorners(this, 24);
         }
     }
 
@@ -287,7 +347,6 @@ namespace PSHistoryChecker
                 Padding = new Padding(28)
             };
 
-            // 상단 타이틀 및 설명 헤더
             var topArea = new Panel
             {
                 Dock = DockStyle.Top,
@@ -314,14 +373,12 @@ namespace PSHistoryChecker
                 Height = 52
             };
 
-            // 가이드 규격 칩 그룹 바 (가로 간격: 6px, 높이: 32px)
             var controlRow = new Panel
             {
                 Dock = DockStyle.Bottom,
                 Height = 32
             };
 
-            // 숨김 상태로 동작하는 실제 날짜 픽커
             dtPicker = new DateTimePicker
             {
                 Format = DateTimePickerFormat.Custom,
@@ -337,19 +394,17 @@ namespace PSHistoryChecker
                 RearrangeFilterChips();
             };
 
-            // Filter/Input 규격 칩 (좌 12px, 쉐브론 ∨, 우 10px, 높이 32px)
             btnDateFilter = new TossChipButton
             {
                 Text = selectedDate.ToString("yyyy년 MM월 dd일"),
                 HasChevron = true,
-                BackColor = Color.FromArgb(242, 244, 246),
+                ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(51, 61, 75),
                 Location = new Point(0, 0)
             };
             btnDateFilter.AdjustFlexibleWidth();
             btnDateFilter.Click += (s, e) =>
             {
-                // 칩 클릭 시 달력 팝업 드롭다운 트리거
                 dtPicker.Location = new Point(btnDateFilter.Left, btnDateFilter.Bottom);
                 dtPicker.Visible = true;
                 dtPicker.Focus();
@@ -359,7 +414,7 @@ namespace PSHistoryChecker
             btnConfirm = new TossChipButton
             {
                 Text = "확인",
-                BackColor = Color.FromArgb(49, 130, 246),
+                ChipColor = Color.FromArgb(49, 130, 246),
                 ForeColor = Color.White
             };
             btnConfirm.AdjustFlexibleWidth();
@@ -368,7 +423,7 @@ namespace PSHistoryChecker
             btnRefresh = new TossChipButton
             {
                 Text = "새로고침",
-                BackColor = Color.FromArgb(242, 244, 246),
+                ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(78, 89, 104)
             };
             btnRefresh.AdjustFlexibleWidth();
@@ -390,7 +445,6 @@ namespace PSHistoryChecker
             topArea.Controls.Add(lblDesc);
             topArea.Controls.Add(lblTitle);
 
-            // 하단 액션 버튼 및 면책 문구 (칩 가로 간격: 6px, 높이: 32px)
             var bottomArea = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -407,19 +461,19 @@ namespace PSHistoryChecker
             btnSaveAll = new TossChipButton
             {
                 Text = "전체 명령어 저장",
-                BackColor = Color.FromArgb(49, 130, 246),
+                ChipColor = Color.FromArgb(49, 130, 246),
                 ForeColor = Color.White,
                 Dock = DockStyle.Right
             };
             btnSaveAll.AdjustFlexibleWidth();
             btnSaveAll.Click += (s, e) => SaveAllToFile();
 
-            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 }; // 가이드 규격 Gap: 6px
+            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 };
 
             btnCopyAll = new TossChipButton
             {
                 Text = "전체 복사",
-                BackColor = Color.FromArgb(242, 244, 246),
+                ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(78, 89, 104),
                 Dock = DockStyle.Right
             };
@@ -443,7 +497,6 @@ namespace PSHistoryChecker
             bottomArea.Controls.Add(actionRow);
             bottomArea.Controls.Add(lblFooter);
 
-            // 중앙 리스트 테이블 (높이 48px 카드 로우)
             var gridContainer = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -468,13 +521,17 @@ namespace PSHistoryChecker
                 EnableHeadersVisualStyles = false
             };
 
+            // 헤더 클릭 시 색상 변경 방지
             gridCommands.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(249, 250, 251);
             gridCommands.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(107, 118, 132);
+            gridCommands.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(249, 250, 251);
+            gridCommands.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.FromArgb(107, 118, 132);
             gridCommands.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
             gridCommands.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
             gridCommands.ColumnHeadersHeight = 38;
 
-            gridCommands.DefaultCellStyle.SelectionBackColor = Color.FromArgb(242, 244, 246);
+            // 클릭 시 연한 하늘색으로 선택 표시
+            gridCommands.DefaultCellStyle.SelectionBackColor = Color.FromArgb(232, 243, 255);
             gridCommands.DefaultCellStyle.SelectionForeColor = Color.FromArgb(25, 31, 40);
             gridCommands.DefaultCellStyle.Font = new Font("맑은 고딕", 9.5F);
 
@@ -487,7 +544,7 @@ namespace PSHistoryChecker
 
             var colPreview = new DataGridViewTextBoxColumn
             {
-                HeaderText = "명령어 첫부분",
+                HeaderText = "명령어",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
@@ -501,7 +558,6 @@ namespace PSHistoryChecker
 
             gridCommands.Columns.AddRange(colTime, colPreview, colAction);
 
-            // 목록 내 버튼도 규격(Height: 32px, 캡슐형) 페인팅
             gridCommands.CellPainting += (s, e) =>
             {
                 if (e.RowIndex >= 0 && e.ColumnIndex == 2)
@@ -549,7 +605,6 @@ namespace PSHistoryChecker
             this.Controls.Add(rootPanel);
         }
 
-        // Chip Group 가로 간격(6px) 배치
         private void RearrangeFilterChips()
         {
             int spacing = 6;
@@ -583,7 +638,6 @@ namespace PSHistoryChecker
         {
             allEvents.Clear();
 
-            // 1. 이벤트 로그(4104) 수집
             try
             {
                 string query = "*[System[(EventID=4104)]]";
@@ -614,9 +668,7 @@ namespace PSHistoryChecker
             }
             catch { }
 
-            // 2. 콘솔 히스토리 수집
             LoadConsoleHistoryFile();
-
             DeduplicateAndSortEvents();
         }
 
@@ -812,7 +864,7 @@ namespace PSHistoryChecker
         }
     }
 
-    // 상세 보기 모달
+    // 동글동글한 명령어 보기 상세 모달
     public class CommandDetailModal : Form
     {
         public CommandDetailModal(DateTime time, string command)
@@ -821,15 +873,8 @@ namespace PSHistoryChecker
             this.StartPosition = FormStartPosition.CenterParent;
             this.ShowInTaskbar = false;
             this.Size = new Size(720, 500);
-            this.BackColor = Color.FromArgb(235, 238, 242);
-            this.Padding = new Padding(1);
-
-            var panel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.White,
-                Padding = new Padding(24)
-            };
+            this.BackColor = Color.White;
+            this.Padding = new Padding(24);
 
             var topPanel = new Panel
             {
@@ -849,7 +894,7 @@ namespace PSHistoryChecker
             var btnSave = new TossChipButton
             {
                 Text = "저장하기",
-                BackColor = Color.FromArgb(49, 130, 246),
+                ChipColor = Color.FromArgb(49, 130, 246),
                 ForeColor = Color.White,
                 Dock = DockStyle.Right
             };
@@ -868,12 +913,12 @@ namespace PSHistoryChecker
                 }
             };
 
-            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 }; // Gap: 6px
+            var spacer = new Panel { Dock = DockStyle.Right, Width = 6 };
 
             var btnCopy = new TossChipButton
             {
                 Text = "복사하기",
-                BackColor = Color.FromArgb(242, 244, 246),
+                ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(78, 89, 104),
                 Dock = DockStyle.Right
             };
@@ -913,7 +958,7 @@ namespace PSHistoryChecker
             var btnClose = new TossChipButton
             {
                 Text = "닫기",
-                BackColor = Color.FromArgb(242, 244, 246),
+                ChipColor = Color.FromArgb(242, 244, 246),
                 ForeColor = Color.FromArgb(78, 89, 104),
                 Dock = DockStyle.Fill,
                 Height = 32
@@ -921,10 +966,15 @@ namespace PSHistoryChecker
             btnClose.Click += (s, e) => this.Close();
             bottomPanel.Controls.Add(btnClose);
 
-            panel.Controls.Add(txtContent);
-            panel.Controls.Add(topPanel);
-            panel.Controls.Add(bottomPanel);
-            this.Controls.Add(panel);
+            this.Controls.Add(txtContent);
+            this.Controls.Add(topPanel);
+            this.Controls.Add(bottomPanel);
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            WindowRoundHelper.ApplyRoundedCorners(this, 24);
         }
     }
 
