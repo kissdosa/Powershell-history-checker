@@ -381,7 +381,7 @@ namespace PSHistoryChecker
 
         private bool sortTimeDesc = true;
         private bool sortCmdDesc = false;
-        private int lastSortColumn = 0; // 0: 시간, 2: 명령어
+        private int lastSortColumn = 0;
 
         public MainForm()
         {
@@ -413,7 +413,6 @@ namespace PSHistoryChecker
                 Padding = new Padding(28)
             };
 
-            // 상단 타이틀 영역 (타이틀 + 우측 제품 정보 버튼)
             var topArea = new Panel
             {
                 Dock = DockStyle.Top,
@@ -462,7 +461,6 @@ namespace PSHistoryChecker
                 Height = 52
             };
 
-            // 필터 및 실시간 검색 컨트롤 바
             var controlRow = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -525,7 +523,6 @@ namespace PSHistoryChecker
                 TossModalDialog.ShowWithOverlay(this, "새로고침 완료", "명령어 이력을 최신 상태로 갱신했습니다.");
             };
 
-            // 검색창
             var searchPanel = new Panel
             {
                 Height = 32,
@@ -545,7 +542,6 @@ namespace PSHistoryChecker
             txtSearch.TextChanged += (s, e) => FilterAndDisplay(isInitialLoad: true);
             searchPanel.Controls.Add(txtSearch);
 
-            // 실시간 건수 표시 라벨
             lblItemCount = new Label
             {
                 Text = "총 0개",
@@ -690,10 +686,9 @@ namespace PSHistoryChecker
 
             gridCommands.Columns.AddRange(colTime, colAuth, colPreview, colAction);
 
-            // 컬럼 헤더 클릭 시 오름차순/내림차순 정렬
             gridCommands.ColumnHeaderMouseClick += (s, e) =>
             {
-                if (e.ColumnIndex == 0) // 날짜 시간
+                if (e.ColumnIndex == 0)
                 {
                     sortTimeDesc = !sortTimeDesc;
                     lastSortColumn = 0;
@@ -701,7 +696,7 @@ namespace PSHistoryChecker
                     gridCommands.Columns[2].HeaderText = "명령어";
                     SortAndBindGrid();
                 }
-                else if (e.ColumnIndex == 2) // 명령어
+                else if (e.ColumnIndex == 2)
                 {
                     sortCmdDesc = !sortCmdDesc;
                     lastSortColumn = 2;
@@ -713,9 +708,8 @@ namespace PSHistoryChecker
 
             gridCommands.CellPainting += (s, e) =>
             {
-                if (e.RowIndex >= 0 && e.ColumnIndex == 1) // 구분 컬럼
+                if (e.RowIndex >= 0 && e.ColumnIndex == 1)
                 {
-                    // 행 선택 시 연하늘색(#E8F3FF), 평상 시 흰색으로 배경 처리
                     bool isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
                     Color cellBg = isSelected ? Color.FromArgb(232, 243, 255) : Color.White;
 
@@ -724,18 +718,31 @@ namespace PSHistoryChecker
                         e.Graphics.FillRectangle(b, e.CellBounds);
                     }
 
-                    // 하단 분할선
                     using (var pen = new Pen(Color.FromArgb(242, 244, 246)))
                     {
                         e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
                     }
 
-                    bool isAdmin = filteredEvents.Count > e.RowIndex && filteredEvents[e.RowIndex].IsAdmin;
-                    string tagText = isAdmin ? "관리자" : "일반";
+                    var item = filteredEvents.Count > e.RowIndex ? filteredEvents[e.RowIndex] : null;
+                    string tagText = "-";
+                    Color chipBg = Color.FromArgb(242, 244, 246);
+                    Color textClr = Color.FromArgb(142, 151, 163);
 
-                    // 관리자: 티파니 앤 코 민트색 (#81D8D0) / 일반: 연한 회색 (#F2F4F6)
-                    Color chipBg = isAdmin ? Color.FromArgb(129, 216, 208) : Color.FromArgb(242, 244, 246);
-                    Color textClr = isAdmin ? Color.White : Color.FromArgb(25, 31, 40);
+                    if (item != null)
+                    {
+                        if (item.AuthStatus == ElevationType.Admin)
+                        {
+                            tagText = "관리자";
+                            chipBg = Color.FromArgb(129, 216, 208); // Tiffany Blue
+                            textClr = Color.White;
+                        }
+                        else if (item.AuthStatus == ElevationType.User)
+                        {
+                            tagText = "일반";
+                            chipBg = Color.FromArgb(242, 244, 246);
+                            textClr = Color.FromArgb(25, 31, 40);
+                        }
+                    }
 
                     var tagRect = new Rectangle(e.CellBounds.X + 10, e.CellBounds.Y + 11, 56, 26);
                     using (var path = WinApiHelper.GetRoundPath(tagRect, 13))
@@ -758,7 +765,7 @@ namespace PSHistoryChecker
                     }
                     e.Handled = true;
                 }
-                else if (e.RowIndex >= 0 && e.ColumnIndex == 3) // 명령어 보기 버튼
+                else if (e.RowIndex >= 0 && e.ColumnIndex == 3)
                 {
                     bool isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
                     Color cellBg = isSelected ? Color.FromArgb(232, 243, 255) : Color.White;
@@ -859,7 +866,6 @@ namespace PSHistoryChecker
             return false;
         }
 
-        // 실시간 활성 파워쉘 프로세스의 관리자 여부 매핑
         private Dictionary<int, bool> GetActivePowerShellElevations()
         {
             var dict = new Dictionary<int, bool>();
@@ -873,14 +879,12 @@ namespace PSHistoryChecker
                             proc.ProcessName.Equals("pwsh", StringComparison.OrdinalIgnoreCase))
                         {
                             bool isAdmin = false;
-                            // 1. 창 타이틀 검사 (가장 확실한 직관적 기준)
                             if (proc.MainWindowTitle.Contains("관리자") || proc.MainWindowTitle.Contains("Administrator"))
                             {
                                 isAdmin = true;
                             }
                             else
                             {
-                                // 2. 프로세스 토큰 Elevation 검사
                                 isAdmin = WinApiHelper.CheckIsProcessElevated(proc.Handle);
                             }
                             dict[proc.Id] = isAdmin;
@@ -897,7 +901,6 @@ namespace PSHistoryChecker
         {
             allEvents.Clear();
             var activePsMap = GetActivePowerShellElevations();
-            bool hasAnyActiveAdmin = activePsMap.ContainsValue(true);
 
             // 1. 이벤트 로그(4104) 분석
             try
@@ -923,27 +926,28 @@ namespace PSHistoryChecker
                         string clean = msg.Trim();
                         if (!string.IsNullOrWhiteSpace(clean) && !IsSystemInternalNoise(clean))
                         {
-                            bool isAdmin = false;
+                            ElevationType auth = ElevationType.Unknown;
                             if (record.ProcessId.HasValue && activePsMap.TryGetValue(record.ProcessId.Value, out bool adminStatus))
                             {
-                                isAdmin = adminStatus;
+                                auth = adminStatus ? ElevationType.Admin : ElevationType.User;
                             }
                             else if (record.UserId != null && record.UserId.Value.StartsWith("S-1-5-18"))
                             {
-                                isAdmin = true;
+                                auth = ElevationType.Admin;
                             }
 
-                            allEvents.Add(new HistoryEntry { Time = time, FullCommand = clean, IsAdmin = isAdmin });
+                            allEvents.Add(new HistoryEntry { Time = time, FullCommand = clean, AuthStatus = auth });
                         }
                     }
                 }
             }
             catch { }
 
-            // 2. 콘솔 히스토리 로드
-            LoadConsoleHistoryFile(hasAnyActiveAdmin);
+            // 2. 콘솔 히스토리 로드 (중복 제거 없이 그대로 전부 취합)
+            LoadConsoleHistoryFile();
 
-            DeduplicateAndSortEvents();
+            // 시간순 내림차순 정렬 (입력된 모든 개별 항목 보존)
+            allEvents.Sort((a, b) => b.Time.CompareTo(a.Time));
         }
 
         private List<string> ParseCommandsFromLines(IEnumerable<string> rawLines)
@@ -960,14 +964,8 @@ namespace PSHistoryChecker
 
                 if (string.IsNullOrWhiteSpace(trimmed)) continue;
 
-                if (currentCmd.Length > 0)
-                {
-                    currentCmd.AppendLine(line);
-                }
-                else
-                {
-                    currentCmd.Append(line);
-                }
+                if (currentCmd.Length > 0) currentCmd.AppendLine(line);
+                else currentCmd.Append(line);
 
                 foreach (char c in trimmed)
                 {
@@ -996,7 +994,7 @@ namespace PSHistoryChecker
             return commands;
         }
 
-        private void LoadConsoleHistoryFile(bool hasAnyActiveAdmin)
+        private void LoadConsoleHistoryFile()
         {
             try
             {
@@ -1027,15 +1025,12 @@ namespace PSHistoryChecker
                     {
                         if (!string.IsNullOrWhiteSpace(cmd) && !IsSystemInternalNoise(cmd))
                         {
-                            // 이벤트 로그에 이미 관리자 플래그가 매핑되어 있는지 확인
-                            var match = allEvents.Find(e => e.FullCommand.Equals(cmd, StringComparison.OrdinalIgnoreCase));
-                            bool isAdmin = match != null ? match.IsAdmin : false;
-
+                            // 텍스트 파일 자체로는 권한을 확인할 수 없으므로 Unknown(-) 처리
                             allEvents.Add(new HistoryEntry
                             {
                                 Time = modTime.AddSeconds(-offsetSeconds),
                                 FullCommand = cmd,
-                                IsAdmin = isAdmin
+                                AuthStatus = ElevationType.Unknown
                             });
                             offsetSeconds++;
                         }
@@ -1043,24 +1038,6 @@ namespace PSHistoryChecker
                 }
             }
             catch { }
-        }
-
-        private void DeduplicateAndSortEvents()
-        {
-            var unique = new List<HistoryEntry>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var item in allEvents)
-            {
-                string key = $"{item.Time:yyyy-MM-dd}|{item.FullCommand.Trim()}";
-                if (seen.Add(key))
-                {
-                    unique.Add(item);
-                }
-            }
-
-            unique.Sort((a, b) => b.Time.CompareTo(a.Time));
-            allEvents = unique;
         }
 
         private void FilterAndDisplay(bool isInitialLoad = false)
@@ -1109,7 +1086,9 @@ namespace PSHistoryChecker
                 if (firstLine.EndsWith("`")) firstLine = firstLine.TrimEnd('`').Trim();
 
                 string preview = firstLine.Length > 55 ? firstLine.Substring(0, 55) + "..." : firstLine;
-                gridCommands.Rows.Add(item.Time.ToString("yyyy-MM-dd HH:mm:ss"), item.IsAdmin ? "관리자" : "일반", preview, "명령어 보기");
+                string authDisplay = item.AuthStatus == ElevationType.Admin ? "관리자" : (item.AuthStatus == ElevationType.User ? "일반" : "-");
+
+                gridCommands.Rows.Add(item.Time.ToString("yyyy-MM-dd HH:mm:ss"), authDisplay, preview, "명령어 보기");
             }
         }
 
@@ -1121,7 +1100,7 @@ namespace PSHistoryChecker
             using (var overlay = new DimOverlayForm(this))
             {
                 overlay.Show();
-                using (var dlg = new CommandDetailModal(entry.Time, entry.FullCommand, entry.IsAdmin))
+                using (var dlg = new CommandDetailModal(entry.Time, entry.FullCommand, entry.AuthStatus))
                 {
                     dlg.ShowDialog(overlay);
                 }
@@ -1140,7 +1119,7 @@ namespace PSHistoryChecker
             var sb = new StringBuilder();
             foreach (var item in filteredEvents)
             {
-                string authStr = item.IsAdmin ? "[관리자]" : "[일반]";
+                string authStr = item.AuthStatus == ElevationType.Admin ? "[관리자]" : (item.AuthStatus == ElevationType.User ? "[일반]" : "[-]");
                 sb.AppendLine($"{item.Time:yyyy-MM-dd HH:mm:ss} | {authStr} | {item.FullCommand}");
             }
 
@@ -1165,7 +1144,7 @@ namespace PSHistoryChecker
                     var sb = new StringBuilder();
                     foreach (var item in filteredEvents)
                     {
-                        string authStr = item.IsAdmin ? "[관리자]" : "[일반]";
+                        string authStr = item.AuthStatus == ElevationType.Admin ? "[관리자]" : (item.AuthStatus == ElevationType.User ? "[일반]" : "[-]");
                         sb.AppendLine($"{item.Time:yyyy-MM-dd HH:mm:ss} | {authStr} | {item.FullCommand}");
                     }
                     File.WriteAllText(sfd.FileName, sb.ToString(), Encoding.UTF8);
@@ -1177,7 +1156,7 @@ namespace PSHistoryChecker
 
     public class CommandDetailModal : Form
     {
-        public CommandDetailModal(DateTime time, string command, bool isAdmin)
+        public CommandDetailModal(DateTime time, string command, ElevationType auth)
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterParent;
@@ -1193,7 +1172,7 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
-            string authLabel = isAdmin ? "[관리자]" : "[일반]";
+            string authLabel = auth == ElevationType.Admin ? "[관리자]" : (auth == ElevationType.User ? "[일반]" : "[-]");
             var lblTitle = new Label
             {
                 Text = $"명령어 상세 보기 {authLabel} ({time:yyyy-MM-dd HH:mm:ss})",
@@ -1228,6 +1207,8 @@ namespace PSHistoryChecker
                     }
                 }
             };
+
+            var spacer = new Panel { Dock = DockStyle.Right, Width = 6, BackColor = Color.White };
 
             var btnCopy = new TossChipButton
             {
@@ -1308,10 +1289,17 @@ namespace PSHistoryChecker
         }
     }
 
+    public enum ElevationType
+    {
+        Unknown,
+        User,
+        Admin
+    }
+
     public class HistoryEntry
     {
         public DateTime Time { get; set; }
         public string FullCommand { get; set; } = string.Empty;
-        public bool IsAdmin { get; set; } = false;
+        public ElevationType AuthStatus { get; set; } = ElevationType.Unknown;
     }
 }
