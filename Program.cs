@@ -328,7 +328,8 @@ namespace PSHistoryChecker
     public class MainForm : Form
     {
         private TossChipButton btnDateFilter = null!;
-        private DateTimePicker dtPicker = null!;
+        private MonthCalendar calPicker = null!;
+        private ToolStripDropDown calDropDown = null!;
         private TossChipButton btnConfirm = null!;
         private TossChipButton btnRefresh = null!;
         private TextBox txtSearch = null!;
@@ -431,24 +432,36 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
-            // 날짜 변경 시 발생하는 선 잔상 방지: 이벤트 처리 후 즉각 Visible = false 설정
-            dtPicker = new DateTimePicker
+            // 딜레이 없는 즉시 반응형 팝업 달력 (ToolStripDropDown + MonthCalendar)
+            calPicker = new MonthCalendar
             {
-                Format = DateTimePickerFormat.Custom,
-                CustomFormat = "yyyy년 MM월 dd일",
-                Visible = false,
-                Size = new Size(160, 24)
+                MaxSelectionCount = 1,
+                ShowToday = true,
+                ShowTodayCircle = true
             };
-            dtPicker.ValueChanged += (s, e) =>
+
+            var calHost = new ToolStripControlHost(calPicker)
             {
-                selectedDate = dtPicker.Value.Date;
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+
+            calDropDown = new ToolStripDropDown
+            {
+                Padding = Padding.Empty,
+                DropShadowEnabled = true
+            };
+            calDropDown.Items.Add(calHost);
+
+            // 날짜를 클릭하는 순간 0ms 즉시 반영 및 팝업 닫힘
+            calPicker.DateSelected += (s, e) =>
+            {
+                selectedDate = e.Start.Date;
                 btnDateFilter.Text = selectedDate.ToString("yyyy년 MM월 dd일");
                 btnDateFilter.AdjustFlexibleWidth();
                 RearrangeControls();
-                dtPicker.Visible = false;
+                calDropDown.Close();
             };
-            dtPicker.CloseUp += (s, e) => { dtPicker.Visible = false; };
-            dtPicker.LostFocus += (s, e) => { dtPicker.Visible = false; };
 
             btnDateFilter = new TossChipButton
             {
@@ -461,11 +474,8 @@ namespace PSHistoryChecker
             btnDateFilter.AdjustFlexibleWidth();
             btnDateFilter.Click += (s, e) =>
             {
-                dtPicker.Location = new Point(btnDateFilter.Left, btnDateFilter.Bottom + 2);
-                dtPicker.Visible = true;
-                dtPicker.BringToFront();
-                dtPicker.Focus();
-                SendKeys.Send("%{DOWN}");
+                calPicker.SetDate(selectedDate);
+                calDropDown.Show(btnDateFilter, new Point(0, btnDateFilter.Height + 4));
             };
 
             btnConfirm = new TossChipButton
@@ -520,7 +530,6 @@ namespace PSHistoryChecker
                 Width = 120
             };
 
-            controlRow.Controls.Add(dtPicker);
             controlRow.Controls.Add(btnDateFilter);
             controlRow.Controls.Add(btnConfirm);
             controlRow.Controls.Add(btnRefresh);
@@ -594,7 +603,6 @@ namespace PSHistoryChecker
                 BackColor = Color.White
             };
 
-            // 테이블 둘레에 1px 소프트 그레이 테두리를 둘러 배경 대비 강화
             var gridBorderPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -1082,7 +1090,6 @@ namespace PSHistoryChecker
                 TossModalDialog.ShowWithOverlay(this, "복사 완료", "명령어가 클립보드에 복사되었습니다.");
             };
 
-            // 창 크기 및 패딩에 맞춰 우측 8px 여백을 유지하도록 실시간 위치 계산 (버튼 잘림 방지)
             topPanel.Resize += (s, e) =>
             {
                 int btnY = (topPanel.Height - 32) / 2;
@@ -1137,7 +1144,6 @@ namespace PSHistoryChecker
             base.OnLoad(e);
             WinApiHelper.ApplyRoundRegion(this, 20);
 
-            // 최초 로드 시 버튼 위치 재배치
             int btnY = (topPanel.Height - 32) / 2;
             btnSave.Location = new Point(topPanel.Width - btnSave.Width - 8, btnY);
             btnCopy.Location = new Point(btnSave.Left - btnCopy.Width - 8, btnY);
